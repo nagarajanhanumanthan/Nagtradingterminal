@@ -832,18 +832,56 @@ function toggleWL(sym,e){
 }
 
 /* ===== LOAD SYMBOL ===== */
+function generateFakeCandles(basePrice){
+  // Generate realistic-looking candles from a base price
+  let price=basePrice*0.88;const out=[];
+  for(let i=0;i<90;i++){
+    const open=price;
+    const move=(Math.random()-0.46)*price*0.013;
+    const close=Math.max(open+move,0.01);
+    const high=Math.max(open,close)+Math.random()*price*0.004;
+    const low=Math.min(open,close)-Math.random()*price*0.004;
+    const vol=Math.floor(200000+Math.random()*800000);
+    out.push({t:Math.floor(Date.now()/1000)-(90-i)*86400,o:open,h:high,l:Math.max(low,0.01),c:close,v:vol});
+    price=close;
+  }
+  return out;
+}
+
 async function loadSymbol(sym){
   curSym=sym;
   document.getElementById('CSYM').textContent=sym;
   document.getElementById('OBSYM').textContent=sym;
-  document.getElementById('CPRICE').textContent='Loading…';
-  document.getElementById('CCHG').textContent='';
-  document.getElementById('CCHG').className='ch-chg';
   document.querySelectorAll('.wli').forEach(e=>e.classList.toggle('sel',e.dataset.sym===sym));
+
+  // Use cached/seed quote instantly if available
+  const cached=qCache[sym];
+  if(cached&&cached.c){
+    const up=(cached.dp||0)>=0;
+    document.getElementById('CPRICE').textContent=`$${cached.c.toFixed(2)}`;
+    const cc=document.getElementById('CCHG');
+    cc.textContent=`${up?'+':''}${(cached.d||0).toFixed(2)} (${up?'+':''}${(cached.dp||0).toFixed(2)}%)`;
+    cc.className='ch-chg '+(up?'up':'dn');
+    document.getElementById('CO').textContent=cached.o?.toFixed(2)||'—';
+    document.getElementById('CH2').textContent=cached.h?.toFixed(2)||'—';
+    document.getElementById('CL').textContent=cached.l?.toFixed(2)||'—';
+    document.getElementById('CPC').textContent=cached.pc?.toFixed(2)||'—';
+    renderBook(cached.c);addTrade(cached.c);
+    // Show fake candles immediately so chart isn't blank
+    if(!candles.length||candles[0]?.sym!==sym){
+      candles=generateFakeCandles(cached.c);
+      candles.forEach(c=>c.sym=sym);
+      setTimeout(()=>redraw(),50);
+    }
+  } else {
+    document.getElementById('CPRICE').textContent='Loading…';
+    document.getElementById('CCHG').textContent='';
+  }
+
   try{
     const[q,cd]=await Promise.all([getQuote(sym),getCandles(sym)]);
     if(q&&q.c){
-      curPrice=q.c;const up=(q.dp||0)>=0;
+      const up=(q.dp||0)>=0;
       document.getElementById('CPRICE').textContent=`$${q.c.toFixed(2)}`;
       const cc=document.getElementById('CCHG');
       cc.textContent=`${up?'+':''}${(q.d||0).toFixed(2)} (${up?'+':''}${(q.dp||0).toFixed(2)}%)`;
@@ -853,12 +891,14 @@ async function loadSymbol(sym){
       document.getElementById('CL').textContent=q.l?.toFixed(2)||'—';
       document.getElementById('CPC').textContent=q.pc?.toFixed(2)||'—';
       renderBook(q.c);addTrade(q.c);
-    }else{document.getElementById('CPRICE').textContent='No data available';}
+    }
     if(cd&&cd.s==='ok'&&cd.t&&cd.t.length>0){
-      candles=cd.t.map((t,i)=>({t,o:cd.o[i],h:cd.h[i],l:cd.l[i],c:cd.c[i],v:cd.v[i]}));
+      candles=cd.t.map((t,i)=>({t,o:cd.o[i],h:cd.h[i],l:cd.l[i],c:cd.c[i],v:cd.v[i],sym}));
       setTimeout(()=>redraw(),80);
     }
-  }catch(err){document.getElementById('CPRICE').textContent='Error loading data';}
+  }catch(err){
+    if(!cached)document.getElementById('CPRICE').textContent='Error — retrying…';
+  }
 }
 
 /* ===== EMA / MACD / RSI ===== */
@@ -1154,44 +1194,108 @@ function buildCalendar(){
 }
 function chMon(dir){if(dir===0)calOff=0;else calOff+=dir;buildCalendar();}
 
+/* ===== FALLBACK SEED DATA (shown instantly, replaced by live) ===== */
+const SEED={
+  NVDA:{c:131.38,d:2.87,dp:2.23,o:128.51,h:132.44,l:127.98,pc:128.51,v:42800000},
+  AAPL:{c:207.14,d:-1.48,dp:-0.71,o:208.62,h:209.11,l:206.33,pc:208.62,v:38100000},
+  TSLA:{c:295.62,d:3.74,dp:1.28,o:291.88,h:298.44,l:290.11,pc:291.88,v:61400000},
+  MSFT:{c:471.22,d:2.92,dp:0.62,o:468.30,h:473.88,l:467.44,pc:468.30,v:19300000},
+  AMD:{c:171.88,d:4.64,dp:2.77,o:167.24,h:173.22,l:166.88,pc:167.24,v:44200000},
+  META:{c:616.44,d:-2.26,dp:-0.37,o:618.70,h:619.88,l:614.22,pc:618.70,v:14800000},
+  AMZN:{c:231.77,d:2.63,dp:1.15,o:229.14,h:232.88,l:228.44,pc:229.14,v:28700000},
+  GOOGL:{c:185.88,d:-1.54,dp:-0.82,o:187.42,h:188.11,l:185.11,pc:187.42,v:22100000},
+  PLTR:{c:126.33,d:3.45,dp:2.81,o:122.88,h:127.44,l:122.11,pc:122.88,v:71200000},
+  MARA:{c:19.77,d:1.33,dp:7.21,o:18.44,h:20.11,l:18.22,pc:18.44,v:54300000},
+  APLD:{c:9.44,d:0.47,dp:5.24,o:8.97,h:9.66,l:8.88,pc:8.97,v:29100000},
+  COIN:{c:237.88,d:6.38,dp:2.76,o:231.50,h:239.44,l:230.88,pc:231.50,v:17900000},
+  SMCI:{c:40.22,d:-1.68,dp:-4.01,o:41.90,h:42.11,l:39.88,pc:41.90,v:33500000},
+  IONQ:{c:36.44,d:1.57,dp:4.50,o:34.87,h:37.11,l:34.44,pc:34.87,v:48200000},
+  RKLB:{c:23.88,d:1.74,dp:7.86,o:22.14,h:24.22,l:21.88,pc:22.14,v:31700000},
+  SOUN:{c:10.11,d:0.67,dp:7.10,o:9.44,h:10.44,l:9.22,pc:9.44,v:89100000},
+  SPY:{c:551.44,d:2.72,dp:0.50,o:548.72,h:552.88,l:547.88,pc:548.72,v:82100000},
+  QQQ:{c:484.77,d:3.44,dp:0.71,o:481.33,h:485.88,l:480.44,pc:481.33,v:44800000},
+  CRWV:{c:52.88,d:-1.24,dp:-2.29,o:54.12,h:54.44,l:52.22,pc:54.12,v:18400000},
+  NBIS:{c:33.77,d:1.33,dp:4.10,o:32.44,h:34.22,l:32.11,pc:32.44,v:12300000},
+};
+
+function applySeed(){
+  Object.entries(SEED).forEach(([sym,q])=>{
+    if(!qCache[sym]){
+      qCache[sym]=q;
+      updateStat(sym,q);
+      updateWLItem(sym,q);
+      const meta=ALL_SYMBOLS.find(x=>x.s===sym);
+      const vol=q.v>1e6?(q.v/1e6).toFixed(1)+'M':(q.v/1e3).toFixed(0)+'K';
+      const entry={sym,name:meta?.n||sym,price:q.c,chg:q.dp||0,open:q.o,prevClose:q.pc,rawVol:q.v||0,vol};
+      const ex=scanData.find(x=>x.sym===sym);
+      if(ex)Object.assign(ex,entry);else scanData.push(entry);
+    }
+  });
+}
+
+/* ===== PARALLEL QUOTE FETCHER ===== */
+async function fetchQuotesBatch(syms){
+  // Fetch in parallel batches of 5 to respect rate limits
+  const BATCH=5, DELAY=300;
+  for(let i=0;i<syms.length;i+=BATCH){
+    const batch=syms.slice(i,i+BATCH);
+    await Promise.allSettled(batch.map(async sym=>{
+      const q=await getQuote(sym);
+      if(!q||!q.c)return;
+      updateStat(sym,q);
+      updateWLItem(sym,q);
+      const meta=ALL_SYMBOLS.find(x=>x.s===sym);
+      const vol=q.v?(q.v>1e6?(q.v/1e6).toFixed(1)+'M':(q.v/1e3).toFixed(0)+'K'):'—';
+      const entry={sym,name:meta?.n||sym,price:q.c,chg:q.dp||0,open:q.o,prevClose:q.pc,rawVol:q.v||0,vol};
+      const ex=scanData.find(x=>x.sym===sym);
+      if(ex)Object.assign(ex,entry);else scanData.push(entry);
+    }));
+    // Update UI after each batch
+    rebuildWatchlist();buildTicker();buildScanTable();buildHeatmap();
+    if(i+BATCH<syms.length)await new Promise(r=>setTimeout(r,DELAY));
+  }
+}
+
 /* ===== INIT ===== */
 async function init(){
-  loadWL(); // load saved watchlist
+  loadWL();
   buildStatsRow();
   rebuildWatchlist();
   renderAlerts();
-  showToast('📡 Connecting to live market data…');
 
-  // Load all quotes for watchlist + stats + heatmap
+  // Step 1 — Show seed data instantly so page is never blank
+  applySeed();
+  rebuildWatchlist();
+  buildTicker();
+  buildScanTable();
+  buildHeatmap();
+  showToast('📡 Loading live market data…');
+
+  // Step 2 — Load first symbol chart immediately (NVDA or first in WL)
+  const firstSym=watchlist[0]||'NVDA';
+  loadSymbol(firstSym); // fire and forget — chart loads as soon as candles arrive
+
+  // Step 3 — Fetch live quotes in parallel batches
   const allSyms=[...new Set([...watchlist,...STAT_SYMS,...HM_SYMS])];
-  for(const sym of allSyms){
-    const q=await getQuote(sym);if(!q)continue;
-    updateStat(sym,q);updateWLItem(sym,q);
-    const meta=ALL_SYMBOLS.find(x=>x.s===sym);
-    const entry={sym,name:meta?.n||sym,price:q.c,chg:q.dp||0,open:q.o,prevClose:q.pc,rawVol:q.v||0,vol:q.v?(q.v>1e6?(q.v/1e6).toFixed(1)+'M':(q.v/1e3).toFixed(0)+'K'):'—'};
-    const ex=scanData.find(x=>x.sym===sym);if(ex)Object.assign(ex,entry);else scanData.push(entry);
-    await new Promise(r=>setTimeout(r,110));
-  }
-  rebuildWatchlist(); // refresh with live prices
-  buildTicker();buildScanTable();buildHeatmap();
-  await loadSymbol('NVDA');
-  loadNews();
-  showToast('✅ Live data loaded! Press ⌘K to search & add symbols');
+  fetchQuotesBatch(allSyms).then(()=>{
+    rebuildWatchlist();buildTicker();buildScanTable();buildHeatmap();
+    showToast('✅ Live data loaded! Press ⌘K to add symbols');
+  });
 
-  // Refresh every 20s
-  setInterval(async()=>{
+  // Step 4 — Load news
+  loadNews();
+
+  // Step 5 — Refresh live quotes every 30s (batched)
+  setInterval(()=>{
     const syms=[...new Set([...watchlist,...STAT_SYMS])];
-    for(const sym of syms){
-      const q=await getQuote(sym);if(!q)continue;
-      updateStat(sym,q);updateWLItem(sym,q);
-      const sd=scanData.find(x=>x.sym===sym);
-      if(sd){sd.price=q.c;sd.chg=q.dp||0;sd.rawVol=q.v||0;sd.vol=q.v?(q.v>1e6?(q.v/1e6).toFixed(1)+'M':(q.v/1e3).toFixed(0)+'K'):'—';}
-      if(sym===curSym&&q.c){addTrade(q.c);renderBook(q.c);}
+    fetchQuotesBatch(syms).then(()=>{
+      buildHeatmap();buildScanTable();buildTicker();
+      const q=qCache[curSym];
+      if(q&&q.c){addTrade(q.c);renderBook(q.c);}
       checkAlerts();
-      await new Promise(r=>setTimeout(r,130));
-    }
-    buildHeatmap();buildScanTable();buildTicker();
-  },20000);
+    });
+  },30000);
+
   setInterval(loadNews,5*60*1000);
 }
 init();
